@@ -103,10 +103,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'username': user.username or 'No username'
     }
     
+    # Log user info for admin to see their ID
+    logger.info(f"User started bot - ID: {user_id}, Name: {user.first_name}, Username: @{user.username}")
+    
+    # Check if user is admin
+    is_admin = " (ADMIN)" if user_id == ADMIN_USER_ID else ""
+    
     await update.message.reply_text(
-        f"Hello {user.first_name}! 👋\n\n"
+        f"Hello {user.first_name}! 👋{is_admin}\n\n"
         "Welcome to the Category Manager Bot.\n"
+        f"Your User ID: `{user_id}`\n\n"
         "Choose an option:",
+        parse_mode='Markdown',
         reply_markup=get_main_keyboard(user_id)
     )
 
@@ -282,18 +290,18 @@ async def delete_item_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def show_admin_panel(query):
     """Show admin panel with list of users"""
-    if not user_data_storage and not user_info:
+    # Get all users who have interacted with the bot
+    all_users = set(user_info.keys())
+    
+    if not all_users:
         await query.edit_message_text(
-            "👑 *Admin Panel*\n\nNo users found.",
+            "👑 *Admin Panel*\n\nNo users found yet.\n\nUsers will appear here after they send /start to the bot.",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("« Back", callback_data="back_to_main")
             ]])
         )
         return
-    
-    # Get all users who have interacted with the bot
-    all_users = set(user_info.keys()) | set(user_data_storage.keys())
     
     keyboard = []
     for user_id in all_users:
@@ -306,13 +314,20 @@ async def show_admin_panel(query):
             for category_items in user_data_storage[user_id].values():
                 total_items += len(category_items)
         
+        # Count custom categories
+        custom_count = len(user_custom_categories.get(user_id, []))
+        
         button_text = f"{user_name} (@{username}) - {total_items} items"
+        if custom_count > 0:
+            button_text += f" | {custom_count} custom cats"
+        
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"admin_user_{user_id}")])
     
     keyboard.append([InlineKeyboardButton("« Back", callback_data="back_to_main")])
     
+    total_users = len(all_users)
     await query.edit_message_text(
-        "👑 *Admin Panel*\n\nSelect a user to view their data:",
+        f"👑 *Admin Panel*\n\nTotal Users: {total_users}\n\nSelect a user to view their data:",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -324,33 +339,31 @@ async def show_user_data(query, target_user_id):
     user_name = user_info.get(target_user_id, {}).get('first_name', f'User {target_user_id}')
     username = user_info.get(target_user_id, {}).get('username', 'No username')
     
-    if target_user_id not in user_data_storage or not user_data_storage[target_user_id]:
-        await query.edit_message_text(
-            f"👤 *{user_name}* (@{username})\n\nNo data found for this user.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("« Back to Users", callback_data="admin_panel")
-            ]])
-        )
-        return
-    
     # Create buttons for each category this user has data in
     keyboard = []
-    for category, items in user_data_storage[target_user_id].items():
-        if items:  # Only show categories with data
-            button_text = f"{category} ({len(items)} items)"
-            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"admin_view_{target_user_id}_{category}")])
+    has_data = False
+    
+    if target_user_id in user_data_storage and user_data_storage[target_user_id]:
+        for category, items in user_data_storage[target_user_id].items():
+            if items:  # Only show categories with data
+                has_data = True
+                button_text = f"{category} ({len(items)} items)"
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=f"admin_view_{target_user_id}_{category}")])
     
     # Add custom categories if any
-    if target_user_id in user_custom_categories:
+    if target_user_id in user_custom_categories and user_custom_categories[target_user_id]:
         custom_cats = user_custom_categories[target_user_id]
-        if custom_cats:
-            keyboard.append([InlineKeyboardButton("📁 Custom Categories", callback_data=f"admin_custom_{target_user_id}")])
+        keyboard.append([InlineKeyboardButton(f"📁 Custom Categories ({len(custom_cats)})", callback_data=f"admin_custom_{target_user_id}")])
     
     keyboard.append([InlineKeyboardButton("« Back to Users", callback_data="admin_panel")])
     
+    if not has_data and (target_user_id not in user_custom_categories or not user_custom_categories[target_user_id]):
+        message = f"👤 *{user_name}* (@{username})\n\nThis user hasn't added any data yet."
+    else:
+        message = f"👤 *{user_name}* (@{username})\n\nSelect a category to view:"
+    
     await query.edit_message_text(
-        f"👤 *{user_name}* (@{username})\n\nSelect a category to view:",
+        message,
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
